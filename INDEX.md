@@ -2,7 +2,7 @@
 
 15 agentes/harnesses do open source, estudados na source contra a anatomia em `../MythosEngine` → `knowledge/AI/software/anatomia-de-um-agente.md`. Um relatório por agente em `reports/`. Síntese transversal em `SYNTHESIS.md`.
 
-Os 13 primeiros estudados a 2026-06-22 pelo Codex (relay, fan-out); fugu a 2026-06-23 e pi a 2026-06-24 pelo Claude. Tudo verificado (sem stubs, sem falhas, sem limites). Migrar à mão o que valer para a DB do mem-vector.
+Os 13 primeiros estudados a 2026-06-22 pelo Codex (relay, fan-out); fugu a 2026-06-23 e pi a 2026-06-24 pelo Claude. **Backfill 2026-06-24:** a anatomia cresceu de 15 para **21 dimensões** (+observability, evidência/proveniência, evals, untrusted-input, human-steering, concorrência/multi-sessão); cada report ganhou uma secção **"Dimensões novas"** (os 13 por fan-out do Codex, fugu/pi pelo Claude). Tudo verificado. Migrar à mão o que valer para a DB do mem-vector.
 
 | Agente | Tipo | Veredito (1 linha) | Importar primeiro | Report |
 |---|---|---|---|---|

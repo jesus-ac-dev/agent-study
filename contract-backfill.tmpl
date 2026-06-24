@@ -1,0 +1,29 @@
+És um analista de agentes de coding. A source de UM agente está clonada em `clones/__NAME__` (a partir da working root atual). JÁ EXISTE um relatório em `reports/__NAME__.md` — **NÃO o leias nem o reescrevas**; o teu trabalho é só as 6 dimensões NOVAS da anatomia, a partir do CÓDIGO.
+
+Lê a source (não de memória). Para CADA uma das 6 dimensões novas, diz COMO este agente a faz com `caminho/ficheiro:linha`; se não existe, escreve "não encontrado". As 6:
+
+- **observability** — o agente externaliza a execução para se ver/debugar/auditar/medir? event log, run-ledger, traces/spans, transcripts de sessão, métricas de custo/tokens, replay, audit log. (≠ verificação, que é confirmar a correção de uma ação.)
+- **evidência/proveniência** — outputs e memórias carregam fonte rastreável? citações, de-onde-veio, provenance/source por facto ou por skill. (≠ recall, que é o mecanismo de trazer.)
+- **evals/avaliação** — há avaliação sistemática da QUALIDADE do agente? datasets de eval, regressão de agente, juízes/LLM-as-judge. (≠ testes unitários normais; ≠ verify in-loop de 1 ação.)
+- **untrusted-input/fronteira de confiança** — trata conteúdo externo (web, resultados de tools, ficheiros, docs recuperados) como hostil? separa do kernel/system-prompt, marca untrusted, defesa de injeção de prompt, SSRF/DNS, allowlist de input.
+- **human-in-the-loop/steering** — o humano injeta input a meio da corrida, aprova, interrompe ou redireciona? filas de steering/follow-up, modos ALLOW/ASK/DENY, confirmação de ações.
+- **concorrência/multi-sessão** — várias sessões/agentes a correr ao mesmo tempo sobre estado partilhado? locks (ficheiro/registo/conversa), isolamento, filas por canal, deteção de escrita concorrente. (≠ orquestração, que é delegar 1 objetivo a subagentes.)
+
+ESCREVE APENAS em `reports/_delta/__NAME__.md` (cria o ficheiro) com EXATAMENTE este formato, e não escrevas em mais lado nenhum (não toques em `reports/__NAME__.md`):
+
+## Dimensões novas — <nome do agente>
+
+| Termo | Como o faz (`ficheiro:linha`) | Força/Fraqueza | vs mem-vector |
+|---|---|---|---|
+| observability | ... | ... | ... |
+| evidência/proveniência | ... | ... | ... |
+| evals/avaliação | ... | ... | ... |
+| untrusted-input | ... | ... | ... |
+| human-steering | ... | ... | ... |
+| concorrência/multi-sessão | ... | ... | ... |
+
+### Importar (só destas 6 dimensões; se nada valer, escreve "nada")
+- [ ] <ideia concreta> — porquê, onde encaixa.
+
+### Não importar / armadilhas (destas 6)
+- ...
