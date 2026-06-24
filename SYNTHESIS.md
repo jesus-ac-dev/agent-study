@@ -1,6 +1,6 @@
 # Síntese transversal — o que 15 agentes ensinam ao mem-vector
 
-Padrões que aparecem em vários relatórios, com quem o faz bem (e ficheiro). Base: os 15 `reports/*.md` (13 com source de agente + `fugu`, hospedado + `pi`, harness de coding TS a sério). Para a DB do mem-vector, migrar à mão.
+Padrões que aparecem em vários relatórios, com quem o faz bem (e ficheiro). Base: os 15 `reports/*.md` (13 com source de agente + `fugu`, hospedado + `pi`, harness de coding TS a sério). Após o backfill de 2026-06-24, cada report cobre **21 dimensões** da anatomia (secção "Dimensões novas"). Para a DB do mem-vector, migrar à mão.
 
 ## TL;DR
 
@@ -8,8 +8,9 @@ Padrões que aparecem em vários relatórios, com quem o faz bem (e ficheiro). B
 2. **O campo valida o teu próprio modelo de memória.** O `tanbiralam/claude-code` usa exatamente o que já tens neste vault: índice `MEMORY.md` curto + ficheiros por tópico, taxonomia `user/feedback/project/reference`, excluir o que é derivável de git, exigir `Why`/`How to apply`. Não é coincidência — é o padrão certo.
 3. **O que vale importar é disciplina, não plataformas.** Quase todos os "não importar" dizem o mesmo: deixa a stack multi-provider/multi-canal/UI, fica com os contratos pequenos.
 4. **O `fugu` é o caso à parte: orquestração não-importável, mas dois presentes.** É um sistema multi-agente hospedado, acedido como um modelo — a coordenação (TRINITY/Conductor) é fechada, não se importa. Mas o repo (instalador/launcher do Codex) dá dois ganhos que os outros não focam: um **guard de auto-proteção do runtime** e a **disciplina de gestão do provider-CLI** (ver padrão 9).
+5. **O backfill de 6 dimensões (2026-06-24) mostra onde o campo já é maduro vs onde está o gap.** Maduros e transversais: **observability** (run-ledger/event-log/transcript/custo — quase universal), **untrusted-input** (fronteira anti-injeção), **human-steering** (mid-run + gates), **concorrência** (locks/isolamento). Gaps: **evals de qualidade** (só os mais maduros têm) e **proveniência por-facto** (todos a fazem por sessão/artefacto, ninguém por afirmação). Os dois gaps caem ao lado do fosso (RAG durável) — é o cluster a construir, não a importar.
 
-## Os 10 padrões
+## Os 16 padrões
 
 ### 1. Memória em duas camadas: store canónico + superfície markdown
 Store consultável + markdown legível por humanos, e estado de trabalho **reconciliado**, nunca fonte de verdade.
@@ -92,6 +93,45 @@ O loop/sessão/compaction/contrato-de-tool ficam pequenos e estáveis; **permiss
 - `pi`: hook bus tipado (`agent-harness.ts` `on`/`subscribe`) com eventos Context / ToolCall(bloqueia) / ToolResult(verifica/termina) / Session(before-compact/tree/fork) / Provider(before-request/payload); `defineTool` para tools de extensão; ~60 extensões reais em `examples/extensions/` — `permission-gate`, `confirm-destructive`, `protected-paths`, `subagent`, `handoff`, `plan-mode`, `todo`, `structured-output`, `custom-provider-*`.
 - `cline`: policy engine como camada antes das tools. `sandcastle`: contrato de provider fino e plugável. `hermes`: relay por `CapabilityDescriptor`. `archon`: capability registry para escolher provider.
 → mem-vector: modelar os add-ons (relay, tasks, permissões) como **extensões sobre um core estável**, com os mesmos pontos de hook (before/after tool, context, before-compact). Encaixa no "módulos = add-ons" já decidido; o relay deixa de exigir reescrever o loop. **Atenção:** o que é integridade do produto (verify pós-write, gate destrutivo) fica no **core**, não em extensão opt-in — o `pi` erra aqui (permissões e guard-rails são todos extensões, nada imposto por omissão).
+
+### 11. Observability: run-ledger + event-log + transcript + custo, de primeira classe
+Quase universal — o campo todo externaliza a corrida (e foi o que a anatomia v1 não tinha como termo).
+- `paperclip`: `heartbeat_runs` (estado/usage/log NDJSON com SHA + custo) + eventos live (`heartbeat_runs.ts:6`).
+- `openclaw`: trajectory logs JSONL por sessão com `traceId` + sanitização. `ruflo`: event sourcing em SQLite (`EventStore.append`, correlação).
+- `cline`/`claude-code`: OpenTelemetry (métricas/logs/traces) + PostHog. `gobii`: timeline de auditoria realtime + export + custo. `open-swe`: LangSmith. `hermes`/`omnigent`/`odysseus`/`openhuman`: ledger/tape JSONL + tokens/custo.
+→ mem-vector: tratar observability como **entidade** (run-ledger + eventos + transcript JSONL + custo/tokens), não logs ad-hoc. Crítico porque o agente-autor escreve sozinho e o relay precisa de replay. (Liga ao padrão 4: reason codes.)
+
+### 12. Untrusted-input: fronteira de confiança explícita (anti prompt-injection)
+Maduro e transversal — tratar conteúdo externo como hostil. Eixo distinto das permissões (capacidade/saída).
+- `openclaw`: proíbe interpolar conteúdo externo no system prompt + deteção de injeção. `odysseus`: política de contexto não-confiável + guard markers + `metadata.trusted=false`.
+- `paperclip`: neutraliza `</turn`, corpos untrusted não alteram o system prompt + quarantine. `hermes`: comandos do LLM delimitados em `<command>` + "ignora directivas embebidas".
+- `open-swe`/`omnigent`: externo em tags untrusted + SSRF/DNS allowlist default-deny. `openhuman`: detector de injeção com score. `ruflo`: guardrail em tool-results MCP.
+→ mem-vector: RAG/chat/web entra **marcado untrusted**, delimitado, nunca altera o Kernel; egress com allowlist + SSRF/DNS guard.
+
+### 13. Human-steering / HITL: injeção mid-run + gates de aprovação
+Duas sub-formas, ambas comuns.
+- **Input a meio** (fila por thread, injetado antes do próximo model-call): `pi`, `open-swe` (`thread_ops`), `openclaw` (`steer()`/`followUp()`), `hermes` (interrupção de outra thread, propaga a tools/children).
+- **Gates de aprovação** (ASK/DENY, pause/resume, fail-closed): `openhuman` (`ApprovalGate` fail-closed + park), `cline`/`claude-code` (allow/deny/ask), `paperclip` (approvals + thread-interactions), `omnigent` (message/interrupt/tool_result/approval), `archon` (approval nodes), `gobii` (`request_human_input`), `odysseus` (`ask_user`).
+→ mem-vector: o Carlos guia o agente-autor/relay a meio (steering por thread) + gate fail-closed nas ações irreversíveis.
+
+### 14. Evals: datasets + LLM-as-judge + regressão (≠ testes unitários)
+Os mais maduros medem **qualidade de agente**, não só passam testes.
+- `cline`: `evals/` com cline-bench, trials, baselines. `gobii`: `EvalScenario` framework. `openclaw`: QA Lab — eval de carácter com modelos-juiz, transcripts, scores.
+- `odysseus`: eval de skills com LLM-as-judge. `ruflo`: benchmark com rubricas + juiz. `open-swe`: dataset LangSmith de `golden_comments`. `paperclip`: promptfoo. `hermes`: live eval de tool-search.
+- Não encontrado: `archon` (só roadmap), `omnigent`, `claude-code`, `sandcastle`, `openhuman`.
+→ mem-vector: evals do **recall e da escrita** do agente-autor (dataset + juiz + regressão). Distinto do verify in-loop (1 ação) e da observability (ver a corrida).
+
+### 15. Concorrência / multi-sessão: lock por unidade + isolamento + um-escritor
+Maduro — N corridas sobre estado partilhado sem corromper.
+- `pi`: lock por-ficheiro (`withFileMutationQueue`, realpath). `openclaw`: session-write-lock com owner + stale detection + watchdog. `hermes`: `SessionDB` WAL (um escritor).
+- `gobii`: Redlock Redis + heartbeat. `paperclip`: `withAgentStartLock` + checkout locks transaccionais. `omnigent`: `asyncio.Lock` por conversa + DB locks. `claude-code`: lockfile cross-process. `archon`/`sandcastle`: isolamento por worktree/branch p/ agentes paralelos.
+→ mem-vector: lock por nota/task + deteção de stale; isolar agentes paralelos; um-escritor por sessão. (Liga ao padrão 5: fila por thread, e ao 6: lock por-ficheiro.)
+
+### 16. Evidência / proveniência: por sessão/artefacto é comum; por-facto é raro (o gap)
+- Comum (sessão/artefacto/run): `paperclip` (`SourceTrustMetadata`), `openclaw` (`InputProvenance`), `hermes` (session provenance), `archon` (eventos com url/path).
+- Recall com proveniência: `ruflo` (contribuição semântica+BM25 explicável), `odysseus` (`rag_sources` filename/snippet/similarity), `openhuman` (`RetrievalHit` source_ref), `open-swe` (findings com file/line/sha).
+- Quase todos anotam "sem citações **por facto**" nos outputs normais.
+→ mem-vector: proveniência **por-facto** (cada nota/afirmação cita a fonte) é a parte a construir — o lado "evidência antes de teoria" do produto. (Reforça o padrão 2: recall com citações.)
 
 ## Importar primeiro (maior alavanca, menor custo)
 

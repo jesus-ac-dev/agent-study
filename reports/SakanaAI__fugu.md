@@ -63,3 +63,20 @@ commit: 655675e
 - `scripts/codex-fugu` (launcher: exec-delegação, mismatch, update throttled+flock, notices/decisions, adoção).
 - `scripts/install.sh` (pin de versão, backup+SHA256 com índice de sessão, deploy do bundle, set-key 0600, rollback).
 - `notes/0001` (key em `.env` 0600), `notes/0002` (índice de sessão no backup), `docs/commands_details.md`.
+
+## Dimensões novas — Sakana Fugu
+
+| Termo | Como o faz (`ficheiro:linha`) | Força/Fraqueza | vs mem-vector |
+|---|---|---|---|
+| observability | Inteligência hospedada (sem observabilidade de runtime no repo). O instalador faz **backup verificado (SHA256)** dos índices de sessão/memória/goals antes de trocar versão (`scripts/install.sh:876,904`) + notices/decisions no launcher. | Parcial: observabilidade de **migração**, não de corrida. | Só o princípio "backup verificado antes de migrar". |
+| evidência/proveniência | Não encontrado (hospedado). | — | — |
+| evals/avaliação | Não encontrado no repo (TRINITY/Conductor e métricas são server-side / papers). | — | — |
+| untrusted-input | Não encontrado como defesa de input. Há o **guard de auto-proteção do runtime** (`base_instructions`, `configs/files/fugu.json`) e o segredo em store 0600. | n/a (safety de runtime, não input-trust). | O guard já está nos imports. |
+| human-steering | Não encontrado (é launcher; o steering é do Codex que ele lança). | — | — |
+| concorrência/multi-sessão | `flock` no update do provider (throttle 1×/h) + backup com índice de sessão (`scripts/codex-fugu:503`, `scripts/install.sh`). | Parcial: lock no **update do provider**, não multi-sessão de agente. | Princípio flock no update do provider-CLI (já nos imports). |
+
+### Importar (destas 6 dimensões)
+- nada novo — os ganhos do fugu (guard de auto-proteção, flock no update, backup verificado) já constavam.
+
+### Não importar / armadilhas (destas 6)
+- Não tomar o fugu como referência destas 6: é um launcher, a maioria é "não encontrado" (vive no serviço hospedado).
