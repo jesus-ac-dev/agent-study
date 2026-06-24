@@ -1,0 +1,81 @@
+---
+tags: [knowledge, synthesis, ai-software, agente-estudo]
+created: 2026-06-22
+summary: Claude Code — agente real e muito completo; importar sobretudo memdir, recall selectivo, extracção assíncrona de memória e invariantes de tool/result para o mem-vector.
+agente: Claude Code
+repo: tanbiralam/claude-code
+commit: 6f6f12b
+---
+
+# Claude Code — estudo de source
+
+> Veredito: É um agente de coding real, não uma demo: tem loop LLM+tools, permissões, tarefas, subagentes, memória, skills, bridge remoto e compactação. Estudado no commit 6f6f12b.
+
+## Identidade
+- O que é: CLI agentivo de coding em TypeScript/Bun, com UI React/Ink, SDK/headless, ferramentas locais, MCP, subagentes e sessões remotas. O README declara que é source vazada/reconstituída, e há stubs para módulos internos ausentes (`README.md`, `package.json`).
+- Provider, linguagem, licença: provider principal Anthropic/Claude, com Bedrock, Vertex e Foundry por env vars (`src/utils/model/providers.ts:4`, `src/utils/model/providers.ts:6`). Linguagem TypeScript (`package.json`). Licença: não encontrado; não há LICENSE e `package.json` não declara licença.
+
+## Anatomia (como faz cada coisa)
+| Termo | Como o faz (`ficheiro`) | Força/Fraqueza | vs agente-autor simples |
+|---|---|---|---|
+| regressão/autoregressão | Autoregressão via streaming de modelo em `query()`: prepara `messages`, `systemPrompt`, `tools` e itera `deps.callModel(...)`; tool calls geram novo turno até não haver follow-up (`src/query.ts:659`, `src/query.ts:829`, `src/query.ts:1062`, `src/query.ts:1357`). Regressão/test harness explícito: não encontrado no clone. | Força: loop robusto com retries, fallback e recuperação de overflow. Fraqueza: grande complexidade operacional. | Melhor em robustez do que um agente-autor simples; pior em custo cognitivo e superfície de bugs. |
+| loop | `while (true)` em `src/query.ts:306`, com estado mutável por iteração, compactação antes da chamada, execução de ferramentas, stop hooks e continuação quando há tool use (`src/query.ts:365`, `src/query.ts:379`, `src/query.ts:1380`). | Força: loop explícito e instrumentado. Fraqueza: muitos gates e transições implícitas. | Melhor quando há sessões longas e ferramentas; para mem-vector convém uma versão menor. |
+| harness | `QueryEngine` encapsula ciclo SDK/headless: persiste user input antes da API, cria system init, chama `query()`, normaliza mensagens e emite `result` (`src/QueryEngine.ts:176`, `src/QueryEngine.ts:436`, `src/QueryEngine.ts:540`, `src/QueryEngine.ts:675`, `src/QueryEngine.ts:1135`). | Força: separa runtime headless de UI. Fraqueza: ainda muito acoplado a estado global. | Melhor como padrão de “engine” reutilizável; mem-vector devia copiar a fronteira, não o volume. |
+| memory | Tem dois sistemas: CLAUDE.md hierárquico/instruções (`src/utils/claudemd.ts:1`) e auto-memory em `<base>/projects/<repo>/memory/MEMORY.md` com directoria validada (`src/memdir/paths.ts:21`, `src/memdir/paths.ts:223`, `src/memdir/paths.ts:257`). | Força: memória persistente file-based, auditável e compatível com vault. Fraqueza: muito dependente de prompt discipline. | Muito melhor do que um agente-autor simples com só chat history. |
+| recall | `findRelevantMemories()` varre frontmatter, pede a Sonnet para escolher até 5 ficheiros e devolve path+mtime (`src/memdir/findRelevantMemories.ts:18`, `src/memdir/findRelevantMemories.ts:39`, `src/memdir/findRelevantMemories.ts:98`). `memoryAge` injeta frescura/staleness (`src/memdir/memoryAge.ts:15`, `src/memdir/memoryAge.ts:33`). | Força: recall selectivo evita carregar todo o vault. Fraqueza: selector LLM pode falhar e não é vector/RAG real. | Para mem-vector, melhor como camada de routing por metadados antes de embeddings. |
+| context | Junta git status e CLAUDE.md/user context em caches (`src/context.ts:116`, `src/context.ts:155`, `src/context.ts:170`). `getMemoryFiles()` carrega Managed, User, Project, Local e auto-memory com includes e dedupe (`src/utils/claudemd.ts:790`, `src/utils/claudemd.ts:803`, `src/utils/claudemd.ts:849`, `src/utils/claudemd.ts:979`). | Força: contexto estratificado por prioridade. Fraqueza: pode injectar demasiado texto. | Melhor do que contexto plano; mem-vector deve manter camadas explícitas. |
+| tools | Registry central em `getAllBaseTools()` inclui Agent, Bash, Read/Edit/Write, Grep/Glob, Web, Todo, Plan, MCP resources, Skill, TaskStop etc. (`src/tools.ts:193`). `assembleToolPool()` junta built-ins + MCP e deduplica com ordem estável (`src/tools.ts:345`). | Força: fonte única de verdade. Fraqueza: tool list gigante obriga tool search/defer. | Melhor para ecossistema grande; mem-vector deve ter core pequeno + descoberta. |
+| system prompt/kernel | Prefixo “You are Claude Code...” em `src/constants/system.ts:10`, variante SDK em `src/constants/system.ts:11`. Prompt efectivo é construído com system/user context e ferramentas em `QueryEngine`/compact (`src/QueryEngine.ts:675`, `src/commands/compact/compact.ts:261`). | Força: kernel parametrizado por modo. Fraqueza: prompt espalhado por vários módulos. | Um agente-autor simples deve ter kernel mais legível, mas copiar a ideia de prefixo por superfície. |
+| skills | Skills são ficheiros markdown com frontmatter: descrição, allowedTools, whenToUse, model, hooks, executionContext, agent (`src/skills/loadSkillsDir.ts:185`). `SkillTool` pode executar skill em subagente isolado/forked (`src/tools/SkillTool/SkillTool.ts:118`, `src/tools/SkillTool/SkillTool.ts:223`). | Força: skills lazy e invocáveis como ferramenta. Fraqueza: loader pesado e policy surface ampla. | Melhor do que comandos hardcoded; mem-vector devia importar skills markdown mínimas para “daily”, “ingest”, “relay”. |
+| planning | `EnterPlanModeTool` muda permission mode para `plan` e devolve instruções read-only (`src/tools/EnterPlanModeTool/EnterPlanModeTool.ts:77`, `src/tools/EnterPlanModeTool/EnterPlanModeTool.ts:104`). `ExitPlanModeV2Tool` exige aprovação e pode gravar plano em disco (`src/tools/ExitPlanModeTool/ExitPlanModeV2Tool.ts:147`, `src/tools/ExitPlanModeTool/ExitPlanModeV2Tool.ts:221`, `src/tools/ExitPlanModeTool/ExitPlanModeV2Tool.ts:243`). | Força: separa explorar de escrever. Fraqueza: pode ser workflow demasiado pesado. | Melhor para tarefas arriscadas; mem-vector precisa de versão leve para planos/tarefas. |
+| behavior | Behavior é moldado por prompts de ferramentas, memory taxonomy e permissões. Ex.: memória proíbe guardar arquitetura/ficheiros deriváveis e exige verificar memória antes de recomendar (`src/memdir/memoryTypes.ts:183`, `src/memdir/memoryTypes.ts:216`, `src/memdir/memoryTypes.ts:240`). | Força: boas guardrails comportamentais baseadas em evals. Fraqueza: depende de o modelo obedecer. | Melhor do que instruções vagas; importar literalmente a taxonomia adaptada. |
+| subagentes/orquestração | `AgentTool` lança agentes com schema para prompt, subagent_type, modelo, background, isolamento worktree/remoto (`src/tools/AgentTool/AgentTool.tsx:82`, `src/tools/AgentTool/AgentTool.tsx:239`). `runAgent()` chama `query()` com contexto, MCP e transcripts próprios (`src/tools/AgentTool/runAgent.ts:248`). Forks herdam contexto com placeholder de tool_results para cache (`src/tools/AgentTool/forkSubagent.ts:96`). | Força: delegação real, background, worktree. Fraqueza: muito complexa para um vault agent. | Melhor para coding pesado; mem-vector só deve copiar subagente de extracção/relay, não swarm completo. |
+| stop/terminação | Termina quando não há `needsFollowUp`, quando há abort, limite de contexto, budget, max turns ou stop hooks (`src/query.ts:1015`, `src/query.ts:1062`, `src/query.ts:1175`, `src/query.ts:1357`). Tasks podem ser paradas via `TaskStopTool` e `stopTask()` (`src/tools/TaskStopTool/TaskStopTool.ts:39`, `src/tasks/stopTask.ts:38`). | Força: muitos caminhos de saída explícitos. Fraqueza: difícil provar ausência de loops. | Melhor que simples “até end_turn”; importar limites claros e reason codes. |
+| verificação | Valida schemas Zod antes de ferramenta (`src/services/tools/toolExecution.ts:614`), preserva pares tool_use/tool_result em compactação (`src/services/compact/sessionMemoryCompact.ts:188`), e `TodoWriteTool` pode nudge para verificação se fecha 3+ tarefas sem verificação (`src/tools/TodoWriteTool/TodoWriteTool.ts:72`, `src/tools/TodoWriteTool/TodoWriteTool.ts:104`). Verificador autónomo geral: só gateado/experimental; não encontrado como fluxo estável. | Força: invariantes técnicos fortes. Fraqueza: verificação de resultado ainda parcial. | Melhor em invariantes; mem-vector deve importar validações de estado e freshness, não só prompts. |
+| permissões/sandbox | `ToolPermissionContext` tem mode, allow/deny/ask, dirs adicionais e bypass flags (`src/Tool.ts:123`). `useCanUseTool` decide allow/deny/ask e chama handlers interactivos/bridge/swarm (`src/hooks/useCanUseTool.tsx:27`, `src/hooks/useCanUseTool.tsx:37`, `src/hooks/useCanUseTool.tsx:160`). Sandbox Bash respeita `dangerouslyDisableSandbox`, excluded commands e `SandboxManager` (`src/tools/BashTool/shouldUseSandbox.ts:130`). | Força: permissões antes de execução e ferramentas filtradas antes do prompt (`src/tools.ts:262`). Fraqueza: política complexa. | Melhor para coding; mem-vector deve ter permissões por namespace do vault/DB/relay. |
+| providers | `getAPIProvider()` escolhe firstParty/bedrock/vertex/foundry por env vars (`src/utils/model/providers.ts:4`). API usa SDK Anthropic, betas, retry/fallback, cost e cache headers (`src/services/api/claude.ts:23`, `src/services/api/claude.ts:231`, `src/services/api/claude.ts:252`). | Força: multi-provider. Fraqueza: acoplado a Claude/Anthropic betas. | Para mem-vector, manter adapter simples OpenAI/Claude/local; não copiar headers privados. |
+| bridge/relay | Bridge remoto corre loop com sessões activas, heartbeats, reconnect e spawner (`src/bridge/bridgeMain.ts:141`, `src/bridge/bridgeMain.ts:202`). Mensagens são filtradas/deduplicadas e control requests tratados (`src/bridge/bridgeMessaging.ts:72`, `src/bridge/bridgeMessaging.ts:132`, `src/bridge/bridgeMessaging.ts:243`). Child sessions expõem permission requests (`src/bridge/sessionRunner.ts:28`). | Força: bom modelo para relay bidireccional com dedupe. Fraqueza: demasiado específico a CCR/claude.ai. | Útil para relay Claude↔Codex, mas só a camada de protocolo/dedupe/ack, não infra completa. |
+| tasks/daily | Tasks background para agentes e sessão principal com output em ficheiro, notificações XML e abort controllers (`src/tasks/LocalAgentTask/LocalAgentTask.tsx:116`, `src/tasks/LocalAgentTask/LocalAgentTask.tsx:466`, `src/tasks/LocalMainSessionTask.ts:1`). Daily log existe para auto-memory em modo Kairos (`src/memdir/paths.ts:237`). | Força: bom encaixe para daily/task log. Fraqueza: task model pensado para CLI interactiva. | Mem-vector deve importar daily log e task notification simples, não UI completa. |
+
+## Pontos fortes (rankeados)
+1. Memória file-based com `MEMORY.md` como índice curto e ficheiros por tópico; é auditável, editável e combina com vault (`src/memdir/memdir.ts:199`, `src/memdir/memdir.ts:221`).
+2. Taxonomia de memória pragmática: user, feedback, project, reference; exclui o que é derivável por código/git e exige `Why`/`How to apply` (`src/memdir/memoryTypes.ts:14`, `src/memdir/memoryTypes.ts:183`).
+3. Extracção assíncrona em subagente com permissões reduzidas, manifest pré-injectado, turn budget e coalescing (`src/services/extractMemories/extractMemories.ts:171`, `src/services/extractMemories/extractMemories.ts:395`, `src/services/extractMemories/extractMemories.ts:415`, `src/services/extractMemories/extractMemories.ts:554`).
+4. Recall selectivo por frontmatter/manifest antes de carregar memória completa (`src/memdir/memoryScan.ts:35`, `src/memdir/findRelevantMemories.ts:39`).
+5. Invariantes de runtime: preservar pares tool_use/tool_result, aborts explícitos, max turns/budget e transcript antes da chamada API (`src/services/compact/sessionMemoryCompact.ts:188`, `src/QueryEngine.ts:436`, `src/query.ts:1380`).
+6. Bridge com dedupe de UUID, elegibilidade de mensagens e control requests; bom padrão para relay entre superfícies (`src/bridge/bridgeMessaging.ts:77`, `src/bridge/bridgeMessaging.ts:168`, `src/bridge/bridgeMessaging.ts:243`).
+
+## O que vale importar para o mem-vector
+- [ ] Índice `MEMORY.md` curto + ficheiros por tópico com frontmatter `name/description/type` — encaixa no vault e dá metadados bons para RAG.
+- [ ] Taxonomia `user/feedback/project/reference` com exclusões explícitas — reduz lixo em memória e evita guardar arquitectura derivável.
+- [ ] Pipeline de extracção pós-turno em subagente/worker com allowlist só para leitura e escrita no directório de memória — captura factos sem bloquear a conversa principal.
+- [ ] Manifest de memórias (`[type] filename (mtime): description`) como camada antes de embeddings — barato, interpretável e pode alimentar reranking.
+- [ ] Freshness/staleness em cada recall — no mem-vector, cada memória deve trazer idade e aviso para verificar estado actual.
+- [ ] Separar persistências: memória durável, plano actual, tarefas da conversa e daily log — o source já distingue estes destinos no prompt de memória.
+- [ ] Reason codes de terminação e budget/max-turns — útil para runs autónomos de ingest/daily/relay.
+- [ ] Bridge mínimo com UUID dedupe, ack e control_request para permissões — adaptar para Claude↔Codex sem copiar infra CCR.
+
+## Não importar / armadilhas
+- Não importar a tool surface inteira: Bash, browser, MCP, teams, worktrees, bridge e plugins juntos são excesso para um agente-autor de conhecimento.
+- Não copiar headers, gates GrowthBook, ant-only branches ou código de attestation/provider privado; são acoplamentos Anthropic.
+- Não depender só de selector LLM para recall; mem-vector deve combinar metadata, embeddings e reranking, com fallback determinístico.
+- Não guardar snapshots de arquitectura/código como memória durável; o próprio source avisa que isso deve vir de grep/git e fica obsoleto.
+- Não deixar a memória escrever fora do vault/DB; a validação de path em `paths.ts` existe porque o directório de memória vira allowlist de escrita.
+- Não importar swarms/fork/worktree como primeira versão; subagente de extracção chega.
+- Não misturar transcript com memória durável: `QueryEngine` mostra que transcript é para resume/debug, enquanto memdir é para conhecimento futuro.
+
+## Fontes
+- `README.md`, `package.json`.
+- `src/query.ts`, `src/QueryEngine.ts`, `src/Tool.ts`, `src/tools.ts`.
+- `src/services/tools/toolExecution.ts`, `src/services/tools/toolOrchestration.ts`, `src/services/tools/StreamingToolExecutor.ts`.
+- `src/hooks/useCanUseTool.tsx`, `src/hooks/toolPermission/handlers/interactiveHandler.ts`, `src/hooks/toolPermission/PermissionContext.ts`, `src/utils/permissions/permissions.ts`.
+- `src/tools/BashTool/BashTool.tsx`, `src/tools/BashTool/shouldUseSandbox.ts`.
+- `src/memdir/paths.ts`, `src/memdir/memdir.ts`, `src/memdir/memoryTypes.ts`, `src/memdir/memoryScan.ts`, `src/memdir/memoryAge.ts`, `src/memdir/findRelevantMemories.ts`.
+- `src/services/extractMemories/extractMemories.ts`, `src/services/extractMemories/prompts.ts`, `src/utils/claudemd.ts`, `src/context.ts`.
+- `src/skills/loadSkillsDir.ts`, `src/tools/SkillTool/SkillTool.ts`, `src/skills/mcpSkillBuilders.ts`.
+- `src/tools/AgentTool/AgentTool.tsx`, `src/tools/AgentTool/runAgent.ts`, `src/tools/AgentTool/forkSubagent.ts`.
+- `src/tasks/LocalAgentTask/LocalAgentTask.tsx`, `src/tasks/LocalMainSessionTask.ts`, `src/tasks/stopTask.ts`, `src/tools/TaskStopTool/TaskStopTool.ts`.
+- `src/tools/EnterPlanModeTool/EnterPlanModeTool.ts`, `src/tools/ExitPlanModeTool/ExitPlanModeV2Tool.ts`, `src/tools/TodoWriteTool/TodoWriteTool.ts`.
+- `src/utils/model/providers.ts`, `src/services/api/claude.ts`.
+- `src/bridge/bridgeMain.ts`, `src/bridge/bridgeMessaging.ts`, `src/bridge/sessionRunner.ts`.
+- `src/commands/compact/compact.ts`, `src/services/compact/sessionMemoryCompact.ts`, `src/services/SessionMemory/sessionMemory.ts`.

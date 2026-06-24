@@ -1,0 +1,47 @@
+És um analista de agentes de coding. A source de UM agente está clonada em `clones/__NAME__` (a partir da working root atual). Lê o CÓDIGO, não só o README. Objetivo: extrair o que vale importar para o **mem-vector** — um agente-autor que mantém um vault/DB de conhecimento (chat + RAG + tasks/daily + relay Claude↔Codex).
+
+Regras:
+- Lê o código-fonte. Cita sempre `caminho/ficheiro` (e linha quando ajudar). Evidência antes de teoria: se não viste no código, escreve "não encontrado".
+- Se o repo não for um agente (é piada, demo vazia, ou outra coisa), di-lo logo no veredito e não inventes anatomia.
+- Mapeia o agente contra esta anatomia: regressão/autoregressão, loop, harness, memory, recall, context, tools, system prompt/kernel, skills, planning, behavior, subagentes/orquestração, stop/terminação, verificação, permissões/sandbox, providers.
+- Para cada termo relevante: COMO este agente o faz (com `ficheiro`), é força ou fraqueza, e é melhor ou pior do que faria um agente-autor simples.
+- Fecha com o que vale IMPORTAR para o mem-vector (concreto e rankeado) e o que NÃO importar (armadilhas).
+
+ESCREVE o relatório em `reports/__NAME__.md` (cria o ficheiro) com EXATAMENTE este template, e não escrevas em mais lado nenhum:
+
+---
+tags: [knowledge, synthesis, ai-software, agente-estudo]
+created: 2026-06-22
+summary: <agente> — veredito numa linha + o que vale importar p/ mem-vector.
+agente: <nome>
+repo: <owner/repo>
+commit: <sha clonado, de git -C clones/__NAME__ rev-parse --short HEAD>
+---
+
+# <Agente> — estudo de source
+
+> Veredito: <1-2 linhas>. Estudado no commit <sha>.
+
+## Identidade
+- O que é (2 linhas). Provider, linguagem, licença.
+
+## Anatomia (como faz cada coisa)
+| Termo | Como o faz (`ficheiro`) | Força/Fraqueza | vs agente-autor simples |
+|---|---|---|---|
+| loop | ... | ... | ... |
+| harness | ... | ... | ... |
+| memory | ... | ... | ... |
+| recall | ... | ... | ... |
+| ... (restantes termos relevantes) | | | |
+
+## Pontos fortes (rankeados)
+1. ...
+
+## O que vale importar para o mem-vector
+- [ ] <ideia concreta> — porquê, e onde encaixaria.
+
+## Não importar / armadilhas
+- ...
+
+## Fontes
+- ficheiros-chave lidos, docs.

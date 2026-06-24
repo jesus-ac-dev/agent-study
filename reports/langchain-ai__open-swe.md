@@ -1,0 +1,106 @@
+---
+tags: [knowledge, synthesis, ai-software, agente-estudo]
+created: 2026-06-22
+summary: Open SWE — agente real de coding/review sobre LangGraph+Deep Agents; vale importar queue/eventos, sandbox por thread, memória estruturada de artefactos e analyzer de estilo, não o prompt monolítico.
+agente: Open SWE
+repo: langchain-ai/open-swe
+commit: 0bff510
+---
+
+# Open SWE — estudo de source
+
+> Veredito: agente real e maduro de software engineering, com executor, reviewer, analyzer, chat, scheduler e CI monitor em LangGraph. Estudado no commit 0bff510.
+
+## Identidade
+- Open SWE é um agente Python de coding/review que constrói grafos com `deepagents.create_deep_agent` e expõe entrypoints em `langgraph.json`: `agent`, `reviewer`, `analyzer`, `chat`, `scheduler`, `ci_monitor` (`langgraph.json:5-13`, `agent/server.py:709-756`, `agent/reviewer.py:1138-1165`).
+- Provider/modelos: LangChain `init_chat_model`, com OpenAI, Anthropic, Google GenAI e Fireworks (`agent/utils/model.py:53-61`, `agent/dashboard/options.py:16-63`). Linguagem: Python >=3.11, runtime LangGraph Python 3.12 (`pyproject.toml:1-35`, `langgraph.json:2`). Licença: MIT (`LICENSE:1-21`).
+
+## Anatomia (como faz cada coisa)
+| Termo | Como o faz (`ficheiro`) | Força/Fraqueza | vs agente-autor simples |
+|---|---|---|---|
+| regressão/autoregressão | Autoregressão via LangChain chat model dentro de `create_deep_agent`; não há loop manual token-a-token no repo (`agent/server.py:707-756`, `agent/utils/model.py:53-61`). Regressão/eval existe sobretudo para reviewer: `evals/reviewer/target.py` corre o grafo e extrai tool calls `add_finding`; `evals/reviewer/run_eval.py` configura dataset/modelo/cap (`evals/reviewer/target.py:132-166`, `evals/reviewer/target.py:172-218`, `evals/reviewer/run_eval.py:74-86`). | Força para review: mede comentários/findings estruturados. Fraqueza para agente geral: não encontrado harness equivalente para tarefas de autor ou gestão de conhecimento. | Melhor que agente-autor simples em review regressivo; pior para mem-vector se a métrica central for qualidade de memória/recall/daily, porque teria de criar evals próprios. |
+| loop | O loop é delegado ao Deep Agents/LangGraph; o agente termina quando o modelo já não chama tools. O código define limite alto de recursão e limite de model calls (`DEFAULT_RECURSION_LIMIT = 9999`, `MODEL_CALL_RECURSION_LIMIT = 5000`) e injeta middleware com `exit_behavior="end"` (`agent/server.py:474-477`, `agent/server.py:743-755`). | Força: simples, compatível com LangGraph e middleware. Fraqueza: muita disciplina fica no prompt; não há estado explícito de fases além do que o modelo decide. | Melhor operacionalmente por usar runtime maduro; pior que um agente-autor simples com state machine explícita para daily/tasks, onde fases determinísticas podem ser mais auditáveis. |
+| harness | Harness HTTP/webhooks em FastAPI dispara runs ou enfileira mensagens quando a thread está ocupada (`agent/webapp.py:900-935`, `agent/webapp.py:1729-1771`, `agent/webapp.py:1953-1968`). Scheduler e CI monitor são grafos pequenos `StateGraph` de um nó (`agent/scheduler.py:21-35`, `agent/ci_monitor.py:26-35`). | Força: separa triggers externos do agente e preserva thread. Fraqueza: bastante acoplado a GitHub/Slack/Linear/LangGraph Cloud. | Muito melhor que agente-autor simples para eventos assíncronos. Para mem-vector, importar o padrão de “trigger -> thread -> queue/run”, não a integração inteira. |
+| memory | Não encontrado vector memory/RAG interna. A memória durável é metadata e LangGraph Store: sandbox por thread em metadata (`agent/server.py:375-471`), findings em metadata de reviewer thread (`agent/reviewer_findings.py:343-404`, `agent/reviewer_findings.py:530-570`), review styles no Store namespace `["review_styles"]` (`agent/dashboard/review_styles.py:18-23`, `agent/dashboard/review_styles.py:116-131`). | Força: memória estruturada, queryable e orientada a artefactos. Fraqueza: não é memória semântica geral nem vault. | Melhor que agente simples em estado operacional durável; pior que mem-vector no objetivo nuclear de vault/DB e RAG. |
+| recall | Recall existe por contexto reconstruído: reviewer carrega diff completo, threads existentes, findings anteriores, prompt de estilo do repo, AGENTS.md e guidelines (`agent/reviewer.py:986-1007`, `agent/reviewer.py:1010-1050`, `agent/reviewer.py:1101-1115`). Chat usa ficheiros virtuais `/pr/overview.md`, `/pr/diff.patch`, `/pr/findings.md` e tools read-only (`agent/chat.py:8-13`, `agent/chat.py:71-82`). | Força: recall determinístico e específico à tarefa. Fraqueza: não há ranking semântico amplo; é recall por ids/contexto pré-carregado. | Melhor que agente-autor simples quando há artefactos conhecidos; mem-vector deve combinar isto com vector search e provenance. |
+| context | Contexto é montado em prompt/config: `construct_system_prompt` injeta working dir, repo default, política de PR, identidade, instruções de repo e secções de segurança (`agent/prompt.py:437-498`). Reviewer injeta diff e metadata em `config["configurable"]["diff_text"]`/`diff_line_set` para tools validarem (`agent/reviewer.py:1003-1007`). | Força: contexto explícito e verificável. Fraqueza: prompt grande e prescritivo, risco de rigidez. | Melhor em controlo operacional; para mem-vector, usar blocos pequenos e versionados em vez de um kernel gigante. |
+| tools | Ferramentas curadas: main agent recebe HTTP/fetch/web/search, Linear, Slack, PR/review e MCPs opcionais (`agent/server.py:722-740`). Reviewer recebe `add_finding`, `update_finding`, `list_findings`, `publish_review`, resolução/reply e web tools (`agent/reviewer.py:1141-1151`). Built-ins de Deep Agents dão ficheiros/shell/subtasks via backend. | Força: superfície limitada por agente. Fraqueza: ainda há ferramentas poderosas como `http_request`/shell dependentes de sandbox/prompt. | Melhor que agente simples se separar tools por modo. Para mem-vector, criar toolsets por papel: vault write, retrieval, tasks, relay, admin. |
+| system prompt/kernel | Kernel principal em `agent/prompt.py`: setup de repo, AGENTS.md obrigatório, execução/verify/submit/comment, PR policy, comunicação, untrusted comments, dependências e autoria (`agent/prompt.py:83-150`, `agent/prompt.py:266-379`, `agent/prompt.py:382-420`). Reviewer tem prompt próprio com workflow, rubric, do-not-file, diff-anchor e publish rules (`agent/reviewer.py:85-306`). | Força: muita experiência operacional codificada. Fraqueza: é demasiado específico a coding/PR; tende a ser frágil se copiado integralmente. | Melhor que agente simples em detalhe; para mem-vector, importar políticas como módulos de kernel, não como texto único. |
+| skills | Analyzer usa skills virtuais por modo em `CompositeBackend`/`StateBackend`; prompt manda ler `SKILL.md` e não improvisar (`agent/analyzer.py:55-77`, `agent/analyzer.py:114-151`). Reviewer materializa skills confiáveis a partir do `base_sha`, não do PR head controlado pelo autor (`agent/utils/repo_prep.py:124-165`). Skills incluídas: bootstrap de estilo e continual learning (`agent/skills/bootstrap-repo-analysis/SKILL.md:15-60`, `agent/skills/continual-learning/SKILL.md:13-44`). | Força: playbooks versionados e isolamento contra prompt injection em PRs. Fraqueza: skills são mais instruções do que código verificável. | Melhor que agente simples; mem-vector deve importar skills como “rotinas de manutenção” do vault/daily/relay, com fontes confiáveis. |
+| planning | Planning é sobretudo promptado: main prompt exige entender/implementar/verificar/submeter/comentar (`agent/prompt.py:136-150`); reviewer tem checklist de leitura, grep, segurança, CI, convenções e ranking antes de publish (`agent/reviewer.py:195-268`). Não encontrado planner algorítmico separado. | Força: barato e legível. Fraqueza: depende da obediência do modelo. | Igual ou ligeiramente melhor que agente-autor simples; para mem-vector, fases críticas como daily rollover e DB migration devem ser state machine, não só prompt. |
+| behavior | Middleware molda comportamento: saneia inputs de tools (`agent/middleware/sanitize_tool_inputs.py:1-7`, `agent/middleware/sanitize_tool_inputs.py:54-88`), captura erros, refresh proxy, queue antes do modelo, status Slack, step-limit, circuit breaker e fallback (`agent/server.py:743-755`). CI autofix tem confidence gating, dedupe, skip base failures/human commits e cap de tentativas (`agent/ci_autofix.py:1-16`, `agent/ci_autofix.py:347-435`). | Força: comportamento crítico sai do prompt para código. Fraqueza: alguns gates continuam em texto de prompt. | Melhor que agente simples. Importar gates como middleware/guards. |
+| subagentes/orquestração | Usa subagente general-purpose do Deep Agents com modelo configurável (`agent/server.py:480-486`, `agent/server.py:741`, `agent/reviewer.py:1152`). Orquestração maior é por grafos separados: agent/reviewer/analyzer/chat/scheduler/ci_monitor (`langgraph.json:5-13`). | Força: separa responsabilidades macro. Fraqueza: subagente interno é genérico; não há equipa especializada profunda. | Melhor que agente simples na separação de entrypoints; para mem-vector, preferir subagentes especializados: curator, retriever, task-daily, relay. |
+| stop/terminação | Stop normal via ausência de tool call; hard stop por `ModelCallLimitMiddleware(exit_behavior="end")` (`agent/server.py:743-746`). Notifica Slack se bate no limite (`agent/middleware/notify_step_limit.py:36-84`). Circuit breaker faz `jump_to="end"` depois de falhas repetidas de sandbox e notifica canais (`agent/middleware/sandbox_circuit_breaker.py:214-259`). | Força: evita loops silenciosos. Fraqueza: step-limit só notifica Slack no middleware específico; outros canais dependem de outros caminhos. | Melhor que agente simples. Para mem-vector, importar stop reasons estruturados e propagá-los a qualquer relay, não só Slack. |
+| verificação | Main prompt manda correr lint/format/testes relacionados, nunca full suite (`agent/prompt.py:136-145`, `agent/prompt.py:307-318`). Reviewer verifica anchors com `compute_diff_line_set` e `add_finding` rejeita out-of-diff (`agent/reviewer_diff.py:127-197`, `agent/tools/add_finding.py:121-133`). PR tool só reporta sucesso com URL/number e grava telemetry (`agent/tools/open_pull_request.py:255-302`). | Força: validação de dados de review é código, não só prompt. Fraqueza: verificação de implementação ainda é maioritariamente delegada ao modelo/shell. | Melhor para review; para mem-vector, usar verificadores estruturais de DB/vault e testes de retrieval. |
+| permissões/sandbox | Sandbox por thread com cache, metadata `sandbox_id`, sentinel `__creating__`, ping/recreate e git identity reaplicada (`agent/server.py:328-363`, `agent/server.py:375-471`). Providers: langsmith/daytona/modal/runloop/local por `SANDBOX_TYPE` (`agent/utils/sandbox.py:9-44`). LangSmith proxy injeta auth GitHub sem escrever token no sandbox (`agent/integrations/langsmith.py:90-115`, `agent/integrations/langsmith.py:137-155`). HTTP tool bloqueia URLs internas/private IPs e pinna DNS por redirect (`agent/tools/http_request.py:125-167`, `agent/tools/http_request.py:180-232`). | Força grande: isolamento operacional e SSRF hardening. Fraqueza: complexo; mem-vector local talvez não precise de cloud sandbox por thread. | Muito melhor que agente simples para coding remoto. Para mem-vector, importar permissões por tool e SSRF/DNS pin; sandbox cloud só se executar código de terceiros. |
+| providers | Modelo é resolvido por thread/profile/team default e mapeado para kwargs por provider (`agent/server.py:585-661`, `agent/utils/model.py:160-190`). Fallback cross-provider OpenAI↔Anthropic em transient errors (`agent/utils/model.py:64-75`, `agent/middleware/model_fallback.py:93-142`). Opções expostas incluem OpenAI, Anthropic, Google e Fireworks (`agent/dashboard/options.py:16-63`). | Força: provider abstraction e fallback. Fraqueza: modelos hardcoded e nomes datados no código; precisa manutenção contínua. | Melhor que agente simples. Para mem-vector, importar interface provider + fallback, mas manter config externa/versionada. |
+
+## Pontos fortes (rankeados)
+1. Queue de mensagens/eventos enquanto a thread está ocupada: `queue_message_for_thread` persiste FIFO no Store e `check_message_queue_before_model` injeta antes do próximo model call (`agent/utils/thread_ops.py:43-78`, `agent/middleware/check_message_queue.py:138-228`). Isto é diretamente útil para relay Claude↔Codex e chat contínuo.
+2. Estado por thread com sandbox/artefactos duráveis: `sandbox_id`, PR metadata, findings e usage ficam em metadata pesquisável, separando execução efémera de estado operacional (`agent/server.py:460-469`, `agent/reviewer_findings.py:530-570`, `agent/tools/open_pull_request.py:147-164`).
+3. Reviewer com findings estruturados e validação de âncora no diff: schema rico, fingerprints, severity/confidence, surface state, interactions e rejeição de out-of-diff (`agent/reviewer_findings.py:92-162`, `agent/tools/add_finding.py:121-177`).
+4. Analyzer de estilo com bootstrap e continual learning: aprende normas de review por repo, guarda prompt no Store e agenda cron diário (`agent/analyzer.py:57-77`, `agent/tools/save_review_style.py:17-28`, `agent/dashboard/analyzer_cron.py:34-57`).
+5. Segurança operacional prática: sandbox proxy sem token no workspace, SSRF/DNS rebinding guard, skills do reviewer extraídas do `base_sha`, não do PR head (`agent/integrations/langsmith.py:137-155`, `agent/tools/http_request.py:180-232`, `agent/utils/repo_prep.py:131-136`).
+6. Stop/failure UX: step-limit e sandbox circuit breaker produzem sinais user-facing em vez de silêncio (`agent/middleware/notify_step_limit.py:36-84`, `agent/middleware/sandbox_circuit_breaker.py:214-259`).
+7. Separação macro por grafos: executor, reviewer, analyzer, chat, scheduler e CI monitor têm entrypoints distintos (`langgraph.json:5-13`).
+
+## O que vale importar para o mem-vector
+- [ ] Queue FIFO por thread/canal — usar `("queue", thread_id)` ou equivalente para relay Claude↔Codex, chat e webhooks; o próximo model-call deve consumir tudo em ordem e limpar cedo para evitar duplicados (`agent/utils/thread_ops.py:43-78`, `agent/middleware/check_message_queue.py:188-228`).
+- [ ] Memory ledger estruturado separado de RAG — criar metadata/DB tables para `thread`, `artifact`, `finding/decision`, `task`, `daily`, `relay_event`; não enfiar tudo no vector store. O padrão de findings metadata e review_styles Store é bom (`agent/reviewer_findings.py:343-404`, `agent/dashboard/review_styles.py:116-131`).
+- [ ] “Before model context assembler” — montar contexto por fontes explícitas: mensagens novas, artefactos relevantes, tasks abertas, daily atual, recalls RAG, permissões. Open SWE mostra isto no reviewer ao reunir diff, threads, style prompt, AGENTS.md e guidelines antes de criar o agente (`agent/reviewer.py:986-1115`).
+- [ ] Analyzer/continual-learning como agente de manutenção do vault — adaptar o `analyzer` para rever outcomes do mem-vector: memórias usadas, memórias ignoradas, correções humanas, falsos positivos, tarefas reabertas; guardar regras/refinamentos em prompt/config versionada (`agent/analyzer.py:137-151`, `agent/skills/continual-learning/SKILL.md:13-44`).
+- [ ] Stop reasons e notificações normalizadas — guardar `completed`, `blocked`, `step_limit`, `sandbox_failure`, `auth_required`, `needs_human` como estados de run, e fazer relay para todos os canais. Open SWE já faz partes disto com step-limit/circuit breaker (`agent/middleware/notify_step_limit.py:54-84`, `agent/middleware/sandbox_circuit_breaker.py:224-259`).
+- [ ] Toolsets por papel — separar agente autor, chat read-only, curator/analyzer, scheduler e relay. O `chat` sem sandbox e sem write/edit/execute é um bom padrão para consultas ao vault (`agent/chat.py:59-89`, `agent/chat.py:139-155`).
+- [ ] SSRF guard e permissions por tool — importar a validação de URL/redirect/DNS pin se o mem-vector tiver `fetch_url`/`http_request` (`agent/tools/http_request.py:125-167`, `agent/tools/http_request.py:180-232`).
+- [ ] Skills confiáveis por fonte — skills de manutenção devem vir de paths/versiones confiáveis, nunca de conteúdo não confiável de conversas ou repos controlados pelo utilizador; o reviewer usa `base_sha` para evitar skill injection (`agent/utils/repo_prep.py:124-165`).
+- [ ] Fallback provider e resolução por perfil/thread — manter seleção de modelo fora do prompt e permitir fallback explícito em erros transitórios (`agent/server.py:620-661`, `agent/middleware/model_fallback.py:93-142`).
+- [ ] Harness de eval para recall/memória — copiar a ideia, não os datasets: criar target que corre cenários de vault e mede se o agente recupera a memória certa, evita memória errada e atualiza tasks/daily corretamente (`evals/reviewer/target.py:132-166`, `evals/reviewer/target.py:172-218`).
+
+## Não importar / armadilhas
+- Não importar o prompt monolítico de coding/PR. É valioso como biblioteca de políticas, mas acopla mem-vector a GitHub/PRs e aumenta fragilidade (`agent/prompt.py:437-458`).
+- Não confundir metadata/findings com memória semântica. Open SWE não tem vector memory/RAG geral; para mem-vector isto é uma lacuna, não uma solução pronta.
+- Não copiar o modelo “tudo via agente decide” para workflows de DB/vault. Daily rollover, migrations, dedupe de memórias e relay delivery precisam transações e state machines.
+- Não herdar a dependência forte de Slack/Linear/GitHub se o objetivo é relay Claude↔Codex local/multi-canal; importar a interface de eventos, não os conectores.
+- Não usar skills vindas de conteúdo não confiável. O detalhe importante é extrair de `base_sha`/fonte confiável, não “ler qualquer SKILL.md”.
+- Não usar sandbox cloud por thread se o mem-vector não executa código arbitrário; é custo e complexidade. Para leitura/escrita de vault local, permissões por tool e backups/versionamento chegam melhor.
+- Não assumir que fallback de provider é neutro: pode mudar custos, privacidade e comportamento. Em mem-vector deve ser política configurável e auditada.
+- Não depender só de prompt para verificação. Open SWE já moveu anchors/review findings para código; mem-vector deve fazer o mesmo para invariantes de memória, tarefas e relay.
+
+## Fontes
+- `clones/langchain-ai__open-swe/langgraph.json`
+- `clones/langchain-ai__open-swe/pyproject.toml`
+- `clones/langchain-ai__open-swe/LICENSE`
+- `clones/langchain-ai__open-swe/agent/server.py`
+- `clones/langchain-ai__open-swe/agent/prompt.py`
+- `clones/langchain-ai__open-swe/agent/reviewer.py`
+- `clones/langchain-ai__open-swe/agent/analyzer.py`
+- `clones/langchain-ai__open-swe/agent/chat.py`
+- `clones/langchain-ai__open-swe/agent/scheduler.py`
+- `clones/langchain-ai__open-swe/agent/ci_monitor.py`
+- `clones/langchain-ai__open-swe/agent/ci_autofix.py`
+- `clones/langchain-ai__open-swe/agent/reviewer_findings.py`
+- `clones/langchain-ai__open-swe/agent/reviewer_diff.py`
+- `clones/langchain-ai__open-swe/agent/reviewer_publish.py`
+- `clones/langchain-ai__open-swe/agent/dashboard/review_styles.py`
+- `clones/langchain-ai__open-swe/agent/dashboard/analyzer_cron.py`
+- `clones/langchain-ai__open-swe/agent/tools/add_finding.py`
+- `clones/langchain-ai__open-swe/agent/tools/open_pull_request.py`
+- `clones/langchain-ai__open-swe/agent/tools/save_review_style.py`
+- `clones/langchain-ai__open-swe/agent/tools/http_request.py`
+- `clones/langchain-ai__open-swe/agent/tools/fetch_url.py`
+- `clones/langchain-ai__open-swe/agent/tools/web_search.py`
+- `clones/langchain-ai__open-swe/agent/middleware/check_message_queue.py`
+- `clones/langchain-ai__open-swe/agent/middleware/model_fallback.py`
+- `clones/langchain-ai__open-swe/agent/middleware/notify_step_limit.py`
+- `clones/langchain-ai__open-swe/agent/middleware/sandbox_circuit_breaker.py`
+- `clones/langchain-ai__open-swe/agent/middleware/sanitize_tool_inputs.py`
+- `clones/langchain-ai__open-swe/agent/utils/model.py`
+- `clones/langchain-ai__open-swe/agent/utils/sandbox.py`
+- `clones/langchain-ai__open-swe/agent/utils/sandbox_state.py`
+- `clones/langchain-ai__open-swe/agent/utils/thread_ops.py`
+- `clones/langchain-ai__open-swe/agent/utils/repo_prep.py`
+- `clones/langchain-ai__open-swe/agent/integrations/langsmith.py`
+- `clones/langchain-ai__open-swe/agent/skills/bootstrap-repo-analysis/SKILL.md`
+- `clones/langchain-ai__open-swe/agent/skills/continual-learning/SKILL.md`
+- `clones/langchain-ai__open-swe/evals/reviewer/run_eval.py`
+- `clones/langchain-ai__open-swe/evals/reviewer/target.py`
