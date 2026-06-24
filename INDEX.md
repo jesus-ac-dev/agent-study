@@ -1,8 +1,8 @@
 # Estudo de agentes — índice
 
-15 agentes/harnesses do open source, estudados na source contra a anatomia em `../MythosEngine` → `knowledge/AI/software/anatomia-de-um-agente.md`. Um relatório por agente em `reports/`. Síntese transversal em `SYNTHESIS.md`.
+16 agentes/harnesses do open source, estudados na source contra a anatomia em `../MythosEngine` → `knowledge/AI/software/anatomia-de-um-agente.md`. Um relatório por agente em `reports/`. Síntese transversal em `SYNTHESIS.md`.
 
-Os 13 primeiros estudados a 2026-06-22 pelo Codex (relay, fan-out); fugu a 2026-06-23 e pi a 2026-06-24 pelo Claude. **Backfill 2026-06-24:** a anatomia cresceu de 15 para **21 dimensões** (+observability, evidência/proveniência, evals, untrusted-input, human-steering, concorrência/multi-sessão); cada report ganhou uma secção **"Dimensões novas"** (os 13 por fan-out do Codex, fugu/pi pelo Claude). Tudo verificado. Migrar à mão o que valer para a DB do mem-vector.
+Os 13 primeiros estudados a 2026-06-22 pelo Codex (relay, fan-out); fugu a 2026-06-23, pi e gstack a 2026-06-24 pelo Claude (gstack já contra a anatomia completa de 21). **Backfill 2026-06-24:** a anatomia cresceu de 15 para **21 dimensões** (+observability, evidência/proveniência, evals, untrusted-input, human-steering, concorrência/multi-sessão); cada report ganhou uma secção **"Dimensões novas"** (os 13 por fan-out do Codex, fugu/pi pelo Claude). Tudo verificado. Migrar à mão o que valer para a DB do mem-vector.
 
 | Agente | Tipo | Veredito (1 linha) | Importar primeiro | Report |
 |---|---|---|---|---|
@@ -21,5 +21,6 @@ Os 13 primeiros estudados a 2026-06-22 pelo Codex (relay, fan-out); fugu a 2026-
 | **cline/cline** | agente real (IDE) | loop tool-result + checkpoints + skills lazy | completion estruturada, separar histórico UI/LLM/searchável, skills lazy, policy antes de tools | `reports/cline__cline.md` |
 | **SakanaAI/fugu** | multi-agente hospedado (≠ source) | sistema multi-agente como UM modelo; o repo é só instalador/launcher/config p/ Codex | **guard de auto-proteção do runtime** (não matar PIDs/próprio runtime), stream-resilience, gestão do provider-CLI, segredo 0600 | `reports/SakanaAI__fugu.md` |
 | **earendil-works/pi** | harness de coding (TS, real) | núcleo mínimo + **tudo-é-extensão** (hook bus tipado); sessão em árvore top, mas zero RAG/conhecimento | seam de extensões/hooks, lock de mutação por-ficheiro, writes diferidos→save point, compaction por usage real + estruturada, project-trust, getApiKey per-call | `reports/earendil-works__pi.md` |
+| **garrytan/gstack** | metodologia/camada sobre Claude Code (≠ harness) | 23 roles + browser-daemon, tudo slash-Markdown; **o `gbrain` é memória-de-conhecimento durável (Supabase) — o sibling mais próximo do mem-vector** | datamark no recall, eval harness 3-tier (static/E2E/LLM-judge), observability machine-readable, recall declarativo por frontmatter, decision-log event-sourced | `reports/garrytan__gstack.md` |
 
 Ler a seguir: **`SYNTHESIS.md`** — os padrões que aparecem em vários e o que vale a pena importar primeiro.

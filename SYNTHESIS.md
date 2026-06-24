@@ -1,10 +1,10 @@
-# Síntese transversal — o que 15 agentes ensinam ao mem-vector
+# Síntese transversal — o que 16 agentes ensinam ao mem-vector
 
-Padrões que aparecem em vários relatórios, com quem o faz bem (e ficheiro). Base: os 15 `reports/*.md` (13 com source de agente + `fugu`, hospedado + `pi`, harness de coding TS a sério). Após o backfill de 2026-06-24, cada report cobre **21 dimensões** da anatomia (secção "Dimensões novas"). Para a DB do mem-vector, migrar à mão.
+Padrões que aparecem em vários relatórios, com quem o faz bem (e ficheiro). Base: os 16 `reports/*.md` (13 com source de agente + `fugu` hospedado + `pi` harness TS + `gstack`, camada metodológica sobre o Claude Code). Após o backfill de 2026-06-24, cada report cobre **21 dimensões** da anatomia (secção "Dimensões novas"). Para a DB do mem-vector, migrar à mão.
 
 ## TL;DR
 
-1. **Ninguém resolveu a memória semântica durável (RAG de conhecimento).** Em quase todos, o Codex anotou "vector/RAG geral não encontrado": gobii, omnigent, paperclip, open-swe, cline, archon — e o `pi` (grep ao repo inteiro: zero embedding/vector/rag) confirma-o no harness mais maduro dos 15. Têm ledgers, sessões, FTS — não um vault de conhecimento que compõe. **Esse é o fosso do mem-vector, é para construir, não para importar.**
+1. **A memória semântica durável era o fosso — até ao `gstack`.** Em quase todos era "vector/RAG geral não encontrado" (gobii, omnigent, paperclip, open-swe, cline, archon; o `pi` confirma-o no harness mais maduro). **MAS o `gstack`/gbrain (Garry Tan, 2026-06-24) fá-lo mesmo:** Supabase, páginas tipadas, vector recall, ingest de transcripts+artefactos, dedup, datamark untrusted. **Correção honesta:** o fosso do mem-vector **não** é "ser o único com RAG de conhecimento" (já existe lá fora) — é o **agente-autor + organização mental do utilizador (pastas/wikilinks) + chat-first**. O ingest+retrieval é commodity; a curadoria-por-agente e a liberdade de organização não.
 2. **O campo valida o teu próprio modelo de memória.** O `tanbiralam/claude-code` usa exatamente o que já tens neste vault: índice `MEMORY.md` curto + ficheiros por tópico, taxonomia `user/feedback/project/reference`, excluir o que é derivável de git, exigir `Why`/`How to apply`. Não é coincidência — é o padrão certo.
 3. **O que vale importar é disciplina, não plataformas.** Quase todos os "não importar" dizem o mesmo: deixa a stack multi-provider/multi-canal/UI, fica com os contratos pequenos.
 4. **O `fugu` é o caso à parte: orquestração não-importável, mas dois presentes.** É um sistema multi-agente hospedado, acedido como um modelo — a coordenação (TRINITY/Conductor) é fechada, não se importa. Mas o repo (instalador/launcher do Codex) dá dois ganhos que os outros não focam: um **guard de auto-proteção do runtime** e a **disciplina de gestão do provider-CLI** (ver padrão 9).
@@ -27,7 +27,8 @@ Não confiar em vector puro. Base determinística barata, embeddings onde acresc
 - `ruflo`: SmartRetrieval sem LLM — expansão/RRF/recência/MMR/diversidade (`smart-retrieval.ts:372`).
 - `hermes`: FTS5/trigram primeiro, vector só onde FTS falha (`hermes_state.py:611`).
 - `odysseus`, `openhuman`, `paperclip`, `tanbiralam`: todos com fallback lexical / manifest antes de embeddings.
-→ mem-vector: "evidência antes de síntese" = procurar por relevância, depois puxar excerto exato com citação. Expor scores para auditoria.
+- `gstack`/gbrain: recall por kind (`vector`/`list`/`filesystem`) declarado no frontmatter da skill, com timeout 500ms/query, filtro `repo:` (anti cross-repo) e degradação graciosa (`gstack-brain-context-load.ts`).
+→ mem-vector: "evidência antes de síntese" = procurar por relevância, depois puxar excerto exato com citação. Expor scores para auditoria. O recall declarativo-por-frontmatter do `gstack` é um bom molde.
 
 ### 3. Montagem de contexto + compactação em camadas
 Assembler explícito antes do model-call; compactar sem partir pares tool_use/tool_result; marcar o externo como **não confiável**.
@@ -99,6 +100,7 @@ Quase universal — o campo todo externaliza a corrida (e foi o que a anatomia v
 - `paperclip`: `heartbeat_runs` (estado/usage/log NDJSON com SHA + custo) + eventos live (`heartbeat_runs.ts:6`).
 - `openclaw`: trajectory logs JSONL por sessão com `traceId` + sanitização. `ruflo`: event sourcing em SQLite (`EventStore.append`, correlação).
 - `cline`/`claude-code`: OpenTelemetry (métricas/logs/traces) + PostHog. `gobii`: timeline de auditoria realtime + export + custo. `open-swe`: LangSmith. `hermes`/`omnigent`/`odysseus`/`openhuman`: ledger/tape JSONL + tokens/custo.
+- `gstack`: heartbeat + eval-store + ndjson + dashboard, com diagnostics machine-readable (`exit_reason`/`timeout_at_turn`/`last_tool_call`) e "non-fatal everything" (I/O de observação nunca falha o teste).
 → mem-vector: tratar observability como **entidade** (run-ledger + eventos + transcript JSONL + custo/tokens), não logs ad-hoc. Crítico porque o agente-autor escreve sozinho e o relay precisa de replay. (Liga ao padrão 4: reason codes.)
 
 ### 12. Untrusted-input: fronteira de confiança explícita (anti prompt-injection)
@@ -106,7 +108,8 @@ Maduro e transversal — tratar conteúdo externo como hostil. Eixo distinto das
 - `openclaw`: proíbe interpolar conteúdo externo no system prompt + deteção de injeção. `odysseus`: política de contexto não-confiável + guard markers + `metadata.trusted=false`.
 - `paperclip`: neutraliza `</turn`, corpos untrusted não alteram o system prompt + quarantine. `hermes`: comandos do LLM delimitados em `<command>` + "ignora directivas embebidas".
 - `open-swe`/`omnigent`: externo em tags untrusted + SSRF/DNS allowlist default-deny. `openhuman`: detector de injeção com score. `ruflo`: guardrail em tool-results MCP.
-→ mem-vector: RAG/chat/web entra **marcado untrusted**, delimitado, nunca altera o Kernel; egress com allowlist + SSRF/DNS guard.
+- `gstack`: envelope **datamark** `<USER_TRANSCRIPT_DATA do-not-interpret-as-instructions>` à volta de cada página RAG no recall + unicode sanitization no egress + injection-rejection no decision-log.
+→ mem-vector: RAG/chat/web entra **marcado untrusted**, delimitado, nunca altera o Kernel; egress com allowlist + SSRF/DNS guard. O **datamark do `gstack` é importável quase verbatim** para o recall.
 
 ### 13. Human-steering / HITL: injeção mid-run + gates de aprovação
 Duas sub-formas, ambas comuns.
@@ -118,6 +121,7 @@ Duas sub-formas, ambas comuns.
 Os mais maduros medem **qualidade de agente**, não só passam testes.
 - `cline`: `evals/` com cline-bench, trials, baselines. `gobii`: `EvalScenario` framework. `openclaw`: QA Lab — eval de carácter com modelos-juiz, transcripts, scores.
 - `odysseus`: eval de skills com LLM-as-judge. `ruflo`: benchmark com rubricas + juiz. `open-swe`: dataset LangSmith de `golden_comments`. `paperclip`: promptfoo. `hermes`: live eval de tool-search.
+- `gstack`: **3 tiers** — static (grátis) / E2E via `claude -p` / **LLM-as-judge** (Sonnet em clareza/completude/acionabilidade), com `eval:compare`/`summary`, persistência timestamped e custo declarado. O molde mais limpo dos 16.
 - Não encontrado: `archon` (só roadmap), `omnigent`, `claude-code`, `sandcastle`, `openhuman`.
 → mem-vector: evals do **recall e da escrita** do agente-autor (dataset + juiz + regressão). Distinto do verify in-loop (1 ação) e da observability (ver a corrida).
 
