@@ -4,7 +4,7 @@
 # Saída: reports/<owner__repo>.md  | Logs: logs/<owner__repo>.log
 # Resumível: salta repos que já têm relatório. Uso: ./run.sh [repo1 repo2 ...]
 set -uo pipefail
-ROOT="$HOME/src/agent-study"
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 CLONES="$ROOT/clones"; REPORTS="$ROOT/reports"; LOGS="$ROOT/logs"
 mkdir -p "$CLONES" "$REPORTS" "$LOGS"
 
@@ -49,5 +49,12 @@ for repo in "${REPOS[@]}"; do
   one_repo "$repo" &
 done
 wait
-echo "=== $(date +%H:%M:%S) FIM. Reports escritos: $(ls -1 "$REPORTS"/*.md 2>/dev/null | wc -l)/13 ==="
+expected="${#REPOS[@]}"
+done_count=0
+for repo in "${REPOS[@]}"; do
+  name="${repo//\//__}"
+  [[ -f "$REPORTS/$name.md" ]] && ((done_count++))
+done
+total_count="$(find "$REPORTS" -maxdepth 1 -type f -name '*.md' | wc -l)"
+echo "=== $(date +%H:%M:%S) FIM. Reports da lista: $done_count/$expected. Reports totais: $total_count ==="
 ls -1 "$REPORTS"/*.md 2>/dev/null | xargs -n1 basename
