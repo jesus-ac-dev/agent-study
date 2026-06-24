@@ -68,7 +68,3 @@ commit: 9fd03fa
 - `bin/gstack-memory-ingest.ts` (ingest de transcripts/artefactos → páginas tipadas gbrain, tiering, dedup session_id, secret-scan), `bin/gstack-brain-context-load.ts` (recall vector/list/fs, 500ms timeout, repo-scope, datamark envelope), `bin/gstack-decision-log` (decisões event-sourced + supersede/redact/compact + injection/secret rejection).
 - `bin/` (~70 scripts: `gstack-gbrain-supabase-*`, `gstack-brain-*`, `learnings-log`/`search`, `decision-search`, `telemetry-*`, `model-benchmark`, `redact`/`redact-prepush`, `codex-probe`/`session-import`).
 - Estrutura de roles: `review/{SKILL.md,checklist.md,specialists}`, `cso/{SKILL.md,sections}`, `claude/SKILL.md.tmpl`, `conductor.json` (Conductor multi-worktree), `agents/openai.yaml` (Codex/OpenAI).
-
-## Dimensões novas — gstack
-> (Esta análise já cobre as 21 dimensões na tabela acima; o gstack foi estudado contra a anatomia completa, não precisa de backfill.)
-</content>

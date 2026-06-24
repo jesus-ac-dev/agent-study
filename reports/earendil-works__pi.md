@@ -34,6 +34,12 @@ commit: ec6311b
 | verificação | **Fraca no core:** sem verify determinístico pós-write. Os guard-rails são **extensões**: `confirm-destructive.ts`, `protected-paths.ts`, `dirty-repo-guard.ts`, `git-checkpoint.ts`, `permission-gate.ts`. | Força: extensível. Fraqueza: nada é imposto por omissão. | Para um agente-autor, o verify pós-escrita (ficheiro/links/task/dedupe) tem de ser do core, não opt-in. |
 | permissões/sandbox | **Duas camadas.** (1) Sandbox de execução = **não-objetivo explícito**, delegado a contentores (gondolin micro-VM / Docker / OpenShell — `docs/containerization.md`, README). (2) **Project trust** (`trust-manager.ts`): ao entrar num dir com config local (`.pi/settings.json`, extensions, skills, prompts, themes, SYSTEM.md) ou `.agents/skills`, **gateia o carregamento desses recursos não-confiáveis** atrás de um prompt (Trust/Trust-parent/sessão/Não), `proper-lockfile`, decisão hierárquica (ancestral mais próximo). As permissões de tool em si são extensões (`permission-gate.ts`) via o hook `beforeToolCall`. | **Força:** o trust anti-injeção (não auto-executar config de dir não-confiável) é maduro. **Risco assumido:** zero isolamento de execução por omissão. | O trust-store hierárquico com lock é importável; o "sandbox via contentor" valida a linha de não herdar config do host às cegas (o runner isola-se). |
 | providers | `packages/ai`: ~30+ providers, OAuth (`oauth.ts`), `credential-store`, adaptadores **lazy** (`api/*.lazy.ts`), provider **`faux`** para testes determinísticos; **`getApiKey` resolvido por chamada** para tokens que expiram (`agent-loop.ts:301`). | **Força:** a abstração de provider mais limpa dos 15 (lazy + faux + OAuth + per-call key). **Fraqueza:** sprawl enorme que o mem-vector não precisa. | Importar os *princípios* (per-call key, faux provider p/ testes, lazy load), não os 30 adaptadores. |
+| observability | **Forte:** event bus tipado (`harness/agent-harness.ts` `on`/`subscribe` — turn/tool/message/`save_point`/`after_provider_response`); sessões JSONL **event-sourced** por cwd, replayáveis (`harness/session/jsonl-repo.ts`); usage real do provider rastreado na compaction (`harness/compaction/compaction.ts:118,137`). | Força grande: tudo observável por eventos + transcript replay. Custo agregado/dashboard fica por extensão. | Melhor que um agente simples; emitir eventos do agente-autor/relay + guardar transcript JSONL. |
+| evidência/proveniência | Skills com **source/proveniência** (`harness/skills.ts:83`); compaction preserva readFiles/modifiedFiles (`compaction.ts:593`). Citação por facto / proveniência de conhecimento: **não encontrado** (sem RAG). | Parcial: proveniência de skills e ficheiros, não de afirmações. | mem-vector precisa de citação por facto no recall; o pi não a tem. |
+| evals/avaliação | Provider **`faux`** + harness de teste determinístico (`packages/coding-agent/test/suite/harness.ts`) e regressões por issue. Eval de **qualidade agêntica** (datasets/juízes): **não encontrado**. | Força: testar o loop sem tokens. Não é eval de qualidade. | Importar o faux-provider; evals de recall/escrita ficam por construir. |
+| untrusted-input | **Project-trust** (`core/trust-manager.ts`) gateia config/skills/extensões de dir não-confiável; o contrato de análise foi endurecido anti-injeção. Marcar tool-results/web untrusted em runtime: não encontrado. | Força no trust de projeto; fraco no untrusted-context runtime. | Importar o trust-store hierárquico; marcar RAG/chat untrusted é nosso. |
+| human-steering | **Forte:** steering a quente, injetado antes da próxima resposta (`agent-loop.ts:167,253`), follow-up (`:257`), `nextTurn`, com modos; API `steer()`/`followUp()`/`nextTurn()` (`agent-harness.ts:657`). | Força grande: input a meio sem reiniciar. | Importar quase literal — é como o Carlos guia o agente-autor/relay. |
+| concorrência/multi-sessão | **Forte:** desenhado p/ **várias sessões no mesmo cwd** (AGENTS.md); `withFileMutationQueue` (lock por `realpath`, `core/tools/file-mutation-queue.ts:32`); JSONL independente por sessão; writes diferidos→save point. | Força grande. | Lock por-ficheiro + writes diferidos já no top-imports. |
 
 ## Pontos fortes (rankeados)
 1. **Arquitetura "núcleo mínimo + tudo-é-extensão" sobre um hook bus tipado** (`agent-harness.ts` `on`/`subscribe`; `extensions/types.ts` com `defineTool` + eventos Session/Context/Tool/Provider; `examples/extensions/` com ~60 extensões reais). Permissões, subagentes, plan-mode, todo, structured-output, project-trust e providers à medida são todos extensões. É o desenho mais reutilizável dos 15.
@@ -52,6 +58,8 @@ commit: ec6311b
 - [ ] **`getApiKey` por chamada + provider `faux` para testes** — barato, e o faux destrava testes do loop sem gastar tokens (encaixa no relay Claude↔Codex).
 - [ ] **Project-trust hierárquico com lockfile** — não auto-carregar config/skills/extensões de fonte não-confiável sem decisão explícita; reforça a quarentena de skills (padrão 7) e o princípio de não herdar config do host.
 - [ ] **Steering + follow-up no loop** — deixar o utilizador injetar instruções enquanto o agente-autor trabalha, processadas antes do próximo passo (`getSteeringMessages`/`getFollowUpMessages`).
+- [ ] **Provider `faux` para testes** — exercitar o loop/relay sem tokens nem provider real.
+- [ ] **Steering a quente + concorrência por-ficheiro** — o pi é a referência destes dois eixos (já no top-imports).
 
 ## Não importar / armadilhas
 - **Não importar os ~30 providers nem a stack TUI/RPC inteira** — o mem-vector usa Claude+Codex; ficar com os *princípios* de provider (per-call key, faux, lazy), não os adaptadores.
@@ -59,6 +67,7 @@ commit: ec6311b
 - **Não herdar a ausência de travões de loop** — o Pi não tem cap de turnos/rondas/stall; manter os reason codes + round cap do mem-vector.
 - **Não confundir a memória de sessão (excelente) com memória de conhecimento (inexistente)** — a árvore JSONL é para conversas, não é o vault que compõe. O recall/RAG continua a ser a parte a construir.
 - **`navigateTree`/fork é poderoso mas é estado de UI de sessão** — não o transformar no modelo de versões do conhecimento sem pensar (o mem-vector já tem `file_versions`/edges).
+- O pi não tem evals de **qualidade** nem citação por facto — "ter testes" não cobre isso; é a parte do mem-vector.
 
 ## Fontes
 - `README.md`, `AGENTS.md` (regras de comportamento + git/release), `package.json` (monorepo, 4 pacotes).
@@ -67,21 +76,3 @@ commit: ec6311b
 - `packages/ai/src/{providers/*,oauth.ts,auth/credential-store.ts,api/*.lazy.ts}` (multi-provider, OAuth, lazy, faux).
 - `packages/coding-agent/examples/extensions/` (~60 extensões: subagent, handoff, plan-mode, todo, structured-output, permission-gate, confirm-destructive, protected-paths, dirty-repo-guard, git-checkpoint, custom-provider-*, sandbox, gondolin), `packages/coding-agent/docs/` (containerization, extensions, sessions, session-format, skills, compaction, security).
 - Grep de confirmação: sem `embedding`/`vector`/`rag`/`memory_search` em `packages/*/src` (1 hit, comentário não-relacionado).
-
-## Dimensões novas — Pi
-
-| Termo | Como o faz (`ficheiro:linha`) | Força/Fraqueza | vs mem-vector |
-|---|---|---|---|
-| observability | **Forte:** event bus tipado (`harness/agent-harness.ts` `on`/`subscribe` — turn/tool/message/`save_point`/`after_provider_response`); sessões JSONL **event-sourced** por cwd, replayáveis (`harness/session/jsonl-repo.ts`); usage real do provider rastreado na compaction (`harness/compaction/compaction.ts:118,137`). | Força grande: tudo observável por eventos + transcript replay. Custo agregado/dashboard fica por extensão. | Melhor que um agente simples; emitir eventos do agente-autor/relay + guardar transcript JSONL. |
-| evidência/proveniência | Skills com **source/proveniência** (`harness/skills.ts:83`); compaction preserva readFiles/modifiedFiles (`compaction.ts:593`). Citação por facto / proveniência de conhecimento: **não encontrado** (sem RAG). | Parcial: proveniência de skills e ficheiros, não de afirmações. | mem-vector precisa de citação por facto no recall; o pi não a tem. |
-| evals/avaliação | Provider **`faux`** + harness de teste determinístico (`packages/coding-agent/test/suite/harness.ts`) e regressões por issue. Eval de **qualidade agêntica** (datasets/juízes): **não encontrado**. | Força: testar o loop sem tokens. Não é eval de qualidade. | Importar o faux-provider; evals de recall/escrita ficam por construir. |
-| untrusted-input | **Project-trust** (`core/trust-manager.ts`) gateia config/skills/extensões de dir não-confiável; o contrato de análise foi endurecido anti-injeção. Marcar tool-results/web untrusted em runtime: não encontrado. | Força no trust de projeto; fraco no untrusted-context runtime. | Importar o trust-store hierárquico; marcar RAG/chat untrusted é nosso. |
-| human-steering | **Forte:** steering a quente, injetado antes da próxima resposta (`agent-loop.ts:167,253`), follow-up (`:257`), `nextTurn`, com modos; API `steer()`/`followUp()`/`nextTurn()` (`agent-harness.ts:657`). | Força grande: input a meio sem reiniciar. | Importar quase literal — é como o Carlos guia o agente-autor/relay. |
-| concorrência/multi-sessão | **Forte:** desenhado p/ **várias sessões no mesmo cwd** (AGENTS.md); `withFileMutationQueue` (lock por `realpath`, `core/tools/file-mutation-queue.ts:32`); JSONL independente por sessão; writes diferidos→save point. | Força grande. | Lock por-ficheiro + writes diferidos já no top-imports. |
-
-### Importar (destas 6 dimensões)
-- [ ] **Provider `faux` para testes** — exercitar o loop/relay sem tokens nem provider real.
-- [ ] **Steering a quente + concorrência por-ficheiro** — o pi é a referência destes dois eixos (já no top-imports).
-
-### Não importar / armadilhas (destas 6)
-- O pi não tem evals de **qualidade** nem citação por facto — "ter testes" não cobre isso; é a parte do mem-vector.

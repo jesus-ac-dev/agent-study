@@ -34,6 +34,12 @@ commit: 655675e
 | verificação | Forte na **distribuição**: backup com `SHA256SUMS` + verificação de integridade que recusa trocar versão se falhar (`scripts/install.sh:904-914`); `verify_installed_version` pós-install (`:743-759`). | Força: nunca migra sem rede de segurança verificada. | Melhor que um instalador ingénuo; aplica-se ao runner, não ao conteúdo. |
 | permissões/sandbox | Chave em `~/.codex/.env` modo **0600** (não no shell rc) carregada pelo Codex (`notes/0001`, `scripts/install.sh:557`); ficheiros de estado `chmod 600/700` (`scripts/codex-fugu:137-146`). | Força: gestão de segredo limpa e por-ficheiro. | Importável: segredo em store 0600 dedicado, não em rc. |
 | providers | **Gestão de provider madura**: pin de versão do Codex + deteção de mismatch config↔binário (`scripts/codex-fugu:512-513`), update throttled 1×/h com **flock** (`:503-506`, `:516-518`), formatos modern/legacy migráveis (`configs/formats/*`), adoção de instalações pré-existentes (`maybe_adopt :397`), `--dry-run`/`--remove-config`/rollback. | **Força grande**: como gerir uma CLI-provider externa de forma segura e não-bloqueante. | Muito melhor que "assume que o codex está bem"; relevante para o runner do relay. |
+| observability | Inteligência hospedada (sem observabilidade de runtime no repo). O instalador faz **backup verificado (SHA256)** dos índices de sessão/memória/goals antes de trocar versão (`scripts/install.sh:876,904`) + notices/decisions no launcher. | Parcial: observabilidade de **migração**, não de corrida. | Só o princípio "backup verificado antes de migrar". |
+| evidência/proveniência | Não encontrado (hospedado). | — | — |
+| evals/avaliação | Não encontrado no repo (TRINITY/Conductor e métricas são server-side / papers). | — | — |
+| untrusted-input | Não encontrado como defesa de input. Há o **guard de auto-proteção do runtime** (`base_instructions`, `configs/files/fugu.json`) e o segredo em store 0600. | n/a (safety de runtime, não input-trust). | O guard já está nos imports. |
+| human-steering | Não encontrado (é launcher; o steering é do Codex que ele lança). | — | — |
+| concorrência/multi-sessão | `flock` no update do provider (throttle 1×/h) + backup com índice de sessão (`scripts/codex-fugu:503`, `scripts/install.sh`). | Parcial: lock no **update do provider**, não multi-sessão de agente. | Princípio flock no update do provider-CLI (já nos imports). |
 
 ## Pontos fortes (rankeados)
 1. **Guard de auto-proteção no system prompt** (`configs/files/fugu.json` → `base_instructions`): não matar o próprio runtime, nunca `kill -9` PIDs arbitrários, parar tarefas por nome. Segurança operacional embutida, agnóstica ao host.
@@ -54,6 +60,7 @@ commit: 655675e
 - **Não copiar o `curl … | bash`** como padrão de instalação — é supply-chain arriscado; se o mem-vector distribuir algo, fazê-lo de forma verificável.
 - **Não confundir este repo com um agente** — não há loop/memória/recall para estudar; a maquinaria de instalador só se aplica se o mem-vector gerir uma CLI-provider externa (que o relay gere — daí a parte 2/3 valerem).
 - Não importar a complexidade de formatos legacy/modern a menos que precises de migrar config de terceiros.
+- Não tomar o fugu como referência destas 6: é um launcher, a maioria é "não encontrado" (vive no serviço hospedado).
 
 ## Fontes
 - `README.md` (o que é, install, papers TRINITY/Conductor), `Fugu_technical_report.pdf` (não lido em detalhe — 6.6MB).
@@ -63,20 +70,3 @@ commit: 655675e
 - `scripts/codex-fugu` (launcher: exec-delegação, mismatch, update throttled+flock, notices/decisions, adoção).
 - `scripts/install.sh` (pin de versão, backup+SHA256 com índice de sessão, deploy do bundle, set-key 0600, rollback).
 - `notes/0001` (key em `.env` 0600), `notes/0002` (índice de sessão no backup), `docs/commands_details.md`.
-
-## Dimensões novas — Sakana Fugu
-
-| Termo | Como o faz (`ficheiro:linha`) | Força/Fraqueza | vs mem-vector |
-|---|---|---|---|
-| observability | Inteligência hospedada (sem observabilidade de runtime no repo). O instalador faz **backup verificado (SHA256)** dos índices de sessão/memória/goals antes de trocar versão (`scripts/install.sh:876,904`) + notices/decisions no launcher. | Parcial: observabilidade de **migração**, não de corrida. | Só o princípio "backup verificado antes de migrar". |
-| evidência/proveniência | Não encontrado (hospedado). | — | — |
-| evals/avaliação | Não encontrado no repo (TRINITY/Conductor e métricas são server-side / papers). | — | — |
-| untrusted-input | Não encontrado como defesa de input. Há o **guard de auto-proteção do runtime** (`base_instructions`, `configs/files/fugu.json`) e o segredo em store 0600. | n/a (safety de runtime, não input-trust). | O guard já está nos imports. |
-| human-steering | Não encontrado (é launcher; o steering é do Codex que ele lança). | — | — |
-| concorrência/multi-sessão | `flock` no update do provider (throttle 1×/h) + backup com índice de sessão (`scripts/codex-fugu:503`, `scripts/install.sh`). | Parcial: lock no **update do provider**, não multi-sessão de agente. | Princípio flock no update do provider-CLI (já nos imports). |
-
-### Importar (destas 6 dimensões)
-- nada novo — os ganhos do fugu (guard de auto-proteção, flock no update, backup verificado) já constavam.
-
-### Não importar / armadilhas (destas 6)
-- Não tomar o fugu como referência destas 6: é um launcher, a maioria é "não encontrado" (vive no serviço hospedado).
